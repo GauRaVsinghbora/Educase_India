@@ -1,10 +1,31 @@
 import { createSchool, getAllSchools } from "../models/schoolModel.js";
 
-export const createSchoolHandler = async (req, res) => {
-try {
+const calculateDistance = (lat1, lon1, lat2, lon2) => {
+const toRad = (value) => (value * Math.PI) / 180;
+const R = 6371; // Radius of Earth in KM
+
+const dLat = toRad(lat2 - lat1);
+const dLon = toRad(lon2 - lon1);
+
+const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+    Math.sin(dLon / 2) ** 2;
+
+const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+return R * c;
+};
+
+export const addSchool = async (req, res) => {
+    const db = req.app?.locals?.db;
+
+    if (!db) {
+    return res.status(500).json({ error: "Database connection unavailable" });
+    }
+
     const { name, address, latitude, longitude } = req.body;
 
-    // Validation inside the handler itself
+
     if (!name || !address || latitude === undefined || longitude === undefined) {
     return res.status(400).json({ error: "All fields (name, address, latitude, longitude) are required." });
     }
@@ -17,74 +38,64 @@ try {
     return res.status(400).json({ error: "Latitude and longitude must be valid numbers." });
     }
 
-    // Clean the data: trim and lowercase name and address
+    try {
     const cleanedData = {
-    name: name.trim().toLowerCase(),
-    address: address.trim().toLowerCase(),
-    latitude: parseFloat(latitude),
-    longitude: parseFloat(longitude)
+        name: name.trim(),
+        address: address.trim(),
+        latitude: parseFloat(latitude),
+        longitude: parseFloat(longitude),
     };
 
-    const schoolId = await createSchool(req.app.locals.db, cleanedData);
-    
-    res.status(201).json({ message: "✅ School created successfully", schoolId });
-} catch (err) {
-    console.error("Error creating school:", err);
-    res.status(500).json({ error: "Something went wrong" });
-}
-};
+    const [existing] = await db.execute("SELECT school_id FROM schools WHERE name = ?", [cleanedData.name]);
 
-const calculateDistance = (lat1, lon1, lat2, lon2) => {
-    const toRad = (value) => (value * Math.PI) / 180;
-
-    const R = 6371; // Earth radius in km
-    const dLat = toRad(lat2 - lat1);
-    const dLon = toRad(lon2 - lon1);
-
-    const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(lat1)) *
-        Math.cos(toRad(lat2)) *
-        Math.sin(dLon / 2) ** 2;
-
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-
-    return R * c; // Distance in kilometers
-};
-
-export const getSchoolsHandler = async (req, res) => {
-try {
-    const schools = await getAllSchools(req.app.locals.db);
-    res.json(schools);
-} catch (err) {
-    console.error("Error fetching schools:", err);
-    res.status(500).json({ error: "Database error" });
-}
-};
-
-export const listSchoolsByProximity = async (req, res) => {
-    const { latitude, longitude } = req.query;
-
-    if (!latitude || !longitude || isNaN(latitude) || isNaN(longitude)) {
-    return res.status(400).json({ error: "Latitude and longitude are required and must be valid numbers." });
+    if (existing.length > 0) {
+        return res.status(409).json({ error: "School with this name already exists." });
     }
 
-    try {
+    const [result] = await db.execute(
+        "INSERT INTO schools (name, address, latitude, longitude) VALUES (?, ?, ?, ?)",
+        [cleanedData.name, cleanedData.address, cleanedData.latitude, cleanedData.longitude]
+    );
+
+    res.status(201).json({ message: "✅ School added successfully", schoolId: result.insertId });
+    } catch (err) {
+    console.error("Error adding school:", err);
+    res.status(500).json({ error: "Failed to add school to database" });
+    }
+};
+
+
+export const listSchoolsByProximity = async (req, res) => {
+const db = req.app?.locals?.db;
+
+if (!db) {
+    return res.status(500).json({ error: "Database connection unavailable" });
+}
+
+const { latitude, longitude } = req.body;
+
+if (!latitude || !longitude || isNaN(latitude) || isNaN(longitude)) {
+    return res.status(400).json({ error: "Latitude and longitude are required and must be valid numbers." });
+}
+
+try {
     const userLat = parseFloat(latitude);
     const userLon = parseFloat(longitude);
 
-    const schools = await getAllSchools(req.app.locals.db);
+    const schools = await getAllSchools(db);
 
     const schoolsWithDistance = schools.map((school) => ({
-        ...school,
-        distance: calculateDistance(userLat, userLon, school.latitude, school.longitude)
+    ...school,
+    distance: calculateDistance(userLat, userLon, school.latitude, school.longitude),
     }));
 
     const sortedSchools = schoolsWithDistance.sort((a, b) => a.distance - b.distance);
 
-    res.json(sortedSchools);
-    } catch (err) {
-    console.error("Error fetching schools by proximity:", err);
-    res.status(500).json({ error: "Internal server error" });
-    }
+    res.status(200).json({ schools: sortedSchools });
+} catch (err) {
+    console.error("Error fetching schools:", err);
+    res.status(500).json({ error: "Failed to retrieve schools" });
+}
 };
+
+

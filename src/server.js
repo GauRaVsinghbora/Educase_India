@@ -1,19 +1,17 @@
-import connectDB from "./db/index.js";
 import "dotenv/config";
+import connectDB from "./db/index.js";
 import { app } from "./app.js";
+import schoolRoutes from "./routes/educase.routes.js";
 
-connectDB()
-    .then((connection) => {
-        app.locals.db = connection; 
+const startServer = async () => {
+const db = await connectDB();
+app.locals.db = db;
 
-        app.on("error", (error) => {
-        console.log("Server error:", error);
-        });
+app.use("/api/v1/", schoolRoutes);
 
-        app.listen(process.env.PORT || 8000, () => {
-        console.log(`📡 Server running at port ${process.env.PORT}`);
-        });
-    })
-    .catch((error) => {
-        console.log("MySQL connection failed ", error);
-    });
+app.listen(process.env.PORT || 8000, () => {
+    console.log(`Server running on port ${process.env.PORT || 8000}`);
+});
+};
+
+startServer();
